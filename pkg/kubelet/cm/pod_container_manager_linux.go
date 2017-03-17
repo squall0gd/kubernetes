@@ -25,6 +25,7 @@ import (
 
 	"github.com/golang/glog"
 	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/kubelet/api/v1alpha1/lifecycle"
 	"k8s.io/kubernetes/pkg/kubelet/qos"
 	"k8s.io/kubernetes/pkg/types"
 	utilerrors "k8s.io/kubernetes/pkg/util/errors"
@@ -56,9 +57,30 @@ var _ PodContainerManager = &podContainerManagerImpl{}
 
 // applyLimits sets pod cgroup resource limits
 // It also updates the resource limits on top level qos containers.
-func (m *podContainerManagerImpl) applyLimits(pod *api.Pod) error {
+func (m *podContainerManagerImpl) applyLimits(pod *api.Pod, replies []*lifecycle.EventReply) error {
 	// This function will house the logic for setting the resource parameters
 	// on the pod container config and updating top level qos container configs
+	if len(replies) < 1 {
+		return nil
+	}
+
+	podContainerName, _ := m.GetPodContainerName(pod)
+	resources := ResourceConfigForPod(pod)
+
+	for _, reply := range replies {
+		if reply.CgroupResource.Type == "CpusetCpus" {
+			resources.CpusetCpus = &reply.CgroupResource.Value
+			glog.V(1).Infof("applying CpusetCpus limit: %v", reply.CgroupResource.Value)
+		}
+	}
+	containerConfig := &CgroupConfig{
+		Name:               podContainerName,
+		ResourceParameters: resources,
+	}
+	glog.Infof("updating pod %s", pod.Name)
+	if err := m.cgroupManager.Update(containerConfig); err != nil {
+		return fmt.Errorf("failed to update container for %v : %v", podContainerName, err)
+	}
 	return nil
 }
 
@@ -71,28 +93,32 @@ func (m *podContainerManagerImpl) Exists(pod *api.Pod) bool {
 // EnsureExists takes a pod as argument and makes sure that
 // pod cgroup exists if qos cgroup hierarchy flag is enabled.
 // If the pod level container doesen't already exist it is created.
-func (m *podContainerManagerImpl) EnsureExists(pod *api.Pod) error {
+func (m *podContainerManagerImpl) EnsureExists(pod *api.Pod) (err error) {
+
 	podContainerName, _ := m.GetPodContainerName(pod)
 	// check if container already exist
 	alreadyExists := m.Exists(pod)
+	replies := []*lifecycle.EventReply{}
 	if !alreadyExists {
 		// Create the pod container
 		containerConfig := &CgroupConfig{
 			Name:               podContainerName,
 			ResourceParameters: ResourceConfigForPod(pod),
 		}
-		if err := m.cgroupManager.Create(containerConfig); err != nil {
+		if err = m.cgroupManager.Create(containerConfig); err != nil {
 			return fmt.Errorf("failed to create container for %v : %v", podContainerName, err)
 		}
 		// Dispatch events to subscribed event handlers, if any.
 		// TODO(CD): Ensure it's ok to do this before calling applyLimits
-		m.eventDispatcher.PreStartPod(pod, string(podContainerName))
+		if replies, err = m.eventDispatcher.PreStartPod(pod, string(podContainerName)); err != nil {
+			return fmt.Errorf("failed to execute PreStartPod hook for: %v: %v", pod.Name, err)
+		}
 	}
 	// Apply appropriate resource limits on the pod container
 	// Top level qos containers limits are not updated
 	// until we figure how to maintain the desired state in the kubelet.
 	// Because maintaining the desired state is difficult without checkpointing.
-	if err := m.applyLimits(pod); err != nil {
+	if err := m.applyLimits(pod, replies); err != nil {
 		return fmt.Errorf("failed to apply resource limits on container for %v : %v", podContainerName, err)
 	}
 	return nil

@@ -3,7 +3,7 @@ apiVersion: v1
 metadata:
   annotations:
     pod.alpha.kubernetes.io/isolation-api: '{
-        "cpu-pinning": "0-1"
+        "core-affinity": "0-1"
     }'
   name: stress-with-pinning
   labels:

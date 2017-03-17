@@ -56,6 +56,7 @@ message Event {
 message EventReply {
   string error = 1;
   CgroupInfo cgroup_info = 2;
+  CgroupResource cgroup_resource = 3;
 }
 
 message CgroupInfo {
@@ -66,4 +67,9 @@ message CgroupInfo {
   };
   Kind kind = 1;
   string path = 2;
+}
+
+message CgroupResource {
+  string type = 1;
+  string value = 2;
 }

@@ -71,11 +71,11 @@ type isoSpec struct {
 }
 
 // set cpuset
-func setCpuSet(cgroupPath string, value string) error {
+func getCpuSet(cgroupPath string, value string) error {
 	path := fmt.Sprintf("%s%s%s", cgroupPrefix, cgroupPath, cgroupSufix)
 	err := ioutil.WriteFile(path, []byte(value), 0644)
 	if err != nil {
-		return fmt.Errorf("Cannot set %s : %v", path, err)
+		return fmt.Errorf("Cannot set coreaffinity for %s : %v", path, err)
 	}
 	return nil
 }
@@ -113,7 +113,7 @@ func getIsoSpec(annotations map[string]string) (spec *isoSpec, err error) {
 // validate isoSpec
 func validateIsoSpec(spec *isoSpec) (err error) {
 	if spec.CoreAffinity == "" {
-		return fmt.Errorf("Required field core-affinity is missing.Given json: %v", spec)
+		return fmt.Errorf("Required field core-affinity is missing.")
 	}
 	return nil
 }
@@ -134,7 +134,10 @@ func (e *eventHandler) Notify(context context.Context, event *lifecycle.Event) (
 		//TODO: Clean this mess up
 		if !isIsoPod(pod) {
 			glog.Infof("Pod %s is not managed by this isolator", pod.Name)
-			return nil, nil
+			return &lifecycle.EventReply{
+				Error:      "",
+				CgroupInfo: event.CgroupInfo,
+			}, nil
 		}
 
 		glog.Infof("Pod %s is managed by this isolator", pod.Name)
@@ -149,22 +152,26 @@ func (e *eventHandler) Notify(context context.Context, event *lifecycle.Event) (
 		err = validateIsoSpec(spec)
 		if err != nil {
 			return &lifecycle.EventReply{
-				Error:      err.Error(),
+				Error:      fmt.Sprintf("Spec is not valid. Given json: %v", pod.Annotations["pod.alpha.kubernetes.io/isolation-api"]),
 				CgroupInfo: event.CgroupInfo,
-			}, err
+			}, fmt.Errorf("Spec is not valid. Given json: %v", pod.Annotations["pod.alpha.kubernetes.io/isolation-api"])
 		}
 		glog.Infof("Pod %s is valid. Value of core-affinity: %s", pod.Name, spec.CoreAffinity)
-		err = setCpuSet(event.CgroupInfo.Path, spec.CoreAffinity)
-		if err != nil {
-			return &lifecycle.EventReply{
-				Error:      err.Error(),
-				CgroupInfo: event.CgroupInfo,
-			}, err
-		}
+		//value, err = getCpuSet(event.CgroupInfo.Path, spec.CoreAffinity)
+		//if err != nil {
+		//	return &lifecycle.EventReply{
+		//		Error:      err.Error(),
+		//		CgroupInfo: event.CgroupInfo,
+		//	}, err
+		//}
 
 		return &lifecycle.EventReply{
 			Error:      "",
 			CgroupInfo: event.CgroupInfo,
+			CgroupResource: &lifecycle.CgroupResource{
+				Type: "CpusetCpus",
+				Value: spec.CoreAffinity,
+			},
 		}, nil
 	default:
 		return nil, fmt.Errorf("Wrong event type")
