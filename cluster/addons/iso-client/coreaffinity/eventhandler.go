@@ -70,16 +70,6 @@ type isoSpec struct {
 	CoreAffinity string `json:"core-affinity"`
 }
 
-// set cpuset
-func getCpuSet(cgroupPath string, value string) error {
-	path := fmt.Sprintf("%s%s%s", cgroupPrefix, cgroupPath, cgroupSufix)
-	err := ioutil.WriteFile(path, []byte(value), 0644)
-	if err != nil {
-		return fmt.Errorf("Cannot set coreaffinity for %s : %v", path, err)
-	}
-	return nil
-}
-
 // extract Pod object from Event
 func getPod(bytePod []byte) (pod *api.Pod, err error) {
 	pod = &api.Pod{}
@@ -131,7 +121,6 @@ func (e *eventHandler) Notify(context context.Context, event *lifecycle.Event) (
 			}, err
 		}
 
-		//TODO: Clean this mess up
 		if !isIsoPod(pod) {
 			glog.Infof("Pod %s is not managed by this isolator", pod.Name)
 			return &lifecycle.EventReply{
@@ -146,7 +135,7 @@ func (e *eventHandler) Notify(context context.Context, event *lifecycle.Event) (
 			return &lifecycle.EventReply{
 				Error:      err.Error(),
 				CgroupInfo: event.CgroupInfo,
-			}, err
+			}, nil
 		}
 		// TODO: Decide whether typo should error POD or not
 		err = validateIsoSpec(spec)
@@ -154,23 +143,16 @@ func (e *eventHandler) Notify(context context.Context, event *lifecycle.Event) (
 			return &lifecycle.EventReply{
 				Error:      fmt.Sprintf("Spec is not valid. Given json: %v", pod.Annotations["pod.alpha.kubernetes.io/isolation-api"]),
 				CgroupInfo: event.CgroupInfo,
-			}, fmt.Errorf("Spec is not valid. Given json: %v", pod.Annotations["pod.alpha.kubernetes.io/isolation-api"])
+			}, nil
 		}
 		glog.Infof("Pod %s is valid. Value of core-affinity: %s", pod.Name, spec.CoreAffinity)
-		//value, err = getCpuSet(event.CgroupInfo.Path, spec.CoreAffinity)
-		//if err != nil {
-		//	return &lifecycle.EventReply{
-		//		Error:      err.Error(),
-		//		CgroupInfo: event.CgroupInfo,
-		//	}, err
-		//}
 
 		return &lifecycle.EventReply{
 			Error:      "",
 			CgroupInfo: event.CgroupInfo,
 			CgroupResource: &lifecycle.CgroupResource{
-				Type: "CpusetCpus",
 				Value: spec.CoreAffinity,
+				CgroupSubsystem: lifecycle.CgroupResource_CPUSET_CPUS,
 			},
 		}, nil
 	default:

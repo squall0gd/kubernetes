@@ -18,7 +18,6 @@ package cm
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -28,6 +27,7 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/kubelet/api/v1alpha1/lifecycle"
+	utilerrors "k8s.io/kubernetes/pkg/util/errors"
 	"k8s.io/kubernetes/pkg/util/uuid"
 )
 
@@ -76,7 +76,7 @@ func newEventDispatcher() *eventDispatcher {
 	return dispatcher
 }
 
-func (ed *eventDispatcher) dispatchEvent(pod *api.Pod, cgroupPath string, kind lifecycle.Event_Kind) ([]*lifecycle.EventReply, error ){
+func (ed *eventDispatcher) dispatchEvent(pod *api.Pod, cgroupPath string, kind lifecycle.Event_Kind) ([]*lifecycle.EventReply, error) {
 	jsonPod, err := json.Marshal(pod)
 	if err != nil {
 		return nil, err
@@ -91,8 +91,9 @@ func (ed *eventDispatcher) dispatchEvent(pod *api.Pod, cgroupPath string, kind l
 		Pod: jsonPod,
 	}
 
-	// TODO: support more than one isolator return list of replies
 	replies := []*lifecycle.EventReply{}
+
+	var errlist []error
 	// TODO(CD): Re-evaluate nondeterministic delegation order arising
 	//           from Go map iteration.
 	for name, handler := range ed.handlers {
@@ -104,23 +105,21 @@ func (ed *eventDispatcher) dispatchEvent(pod *api.Pod, cgroupPath string, kind l
 		cxn, err := grpc.Dial(handler.socketAddress, grpc.WithInsecure())
 		if err != nil {
 			glog.Fatalf("failed to connect to event handler [%s] at [%s]: %v", handler.name, handler.socketAddress, err)
+			errlist = append(errlist, err)
 		}
 		defer cxn.Close()
 		client := lifecycle.NewEventHandlerClient(cxn)
 
 		glog.Infof("Dispatching to event handler: %s", name)
 		reply, err := client.Notify(ctx, ev)
-		replies = append(replies, reply)
 		if err != nil {
-			return replies, err
+			errlist = append(errlist, err)
 		}
-		if reply.Error != "" {
-			return replies, errors.New(reply.Error)
-		}
+		replies = append(replies, reply)
 
 	}
-	// TODO: support more than one isolator return list of replies
-	return replies, nil
+
+	return replies, utilerrors.NewAggregate(errlist)
 }
 
 func (ed *eventDispatcher) PreStartPod(pod *api.Pod, cgroupPath string) ([]*lifecycle.EventReply, error) {

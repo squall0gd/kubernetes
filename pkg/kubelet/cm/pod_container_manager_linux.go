@@ -66,22 +66,33 @@ func (m *podContainerManagerImpl) applyLimits(pod *api.Pod, replies []*lifecycle
 
 	podContainerName, _ := m.GetPodContainerName(pod)
 	resources := ResourceConfigForPod(pod)
-
+	var errlist []error
 	for _, reply := range replies {
-		if reply.CgroupResource.Type == "CpusetCpus" {
+		if reply.Error != "" {
+			errlist = append(errlist, fmt.Errorf("%v", reply.Error))
+			continue
+		}
+		switch  reply.CgroupResource.CgroupSubsystem {
+		case lifecycle.CgroupResource_CPUSET_CPUS:
 			resources.CpusetCpus = &reply.CgroupResource.Value
-			glog.V(1).Infof("applying CpusetCpus limit: %v", reply.CgroupResource.Value)
+			glog.Infof("applying CpusetCpus limit: %v", reply.CgroupResource.Value)
+		default:
+			continue
 		}
 	}
+
 	containerConfig := &CgroupConfig{
 		Name:               podContainerName,
 		ResourceParameters: resources,
 	}
+
 	glog.Infof("updating pod %s", pod.Name)
+
 	if err := m.cgroupManager.Update(containerConfig); err != nil {
 		return fmt.Errorf("failed to update container for %v : %v", podContainerName, err)
 	}
-	return nil
+
+	return utilerrors.NewAggregate(errlist)
 }
 
 // Exists checks if the pod's cgroup already exists
@@ -93,8 +104,8 @@ func (m *podContainerManagerImpl) Exists(pod *api.Pod) bool {
 // EnsureExists takes a pod as argument and makes sure that
 // pod cgroup exists if qos cgroup hierarchy flag is enabled.
 // If the pod level container doesen't already exist it is created.
-func (m *podContainerManagerImpl) EnsureExists(pod *api.Pod) (err error) {
-
+func (m *podContainerManagerImpl) EnsureExists(pod *api.Pod) error {
+	var err error
 	podContainerName, _ := m.GetPodContainerName(pod)
 	// check if container already exist
 	alreadyExists := m.Exists(pod)
@@ -118,7 +129,7 @@ func (m *podContainerManagerImpl) EnsureExists(pod *api.Pod) (err error) {
 	// Top level qos containers limits are not updated
 	// until we figure how to maintain the desired state in the kubelet.
 	// Because maintaining the desired state is difficult without checkpointing.
-	if err := m.applyLimits(pod, replies); err != nil {
+	if err = m.applyLimits(pod, replies); err != nil {
 		return fmt.Errorf("failed to apply resource limits on container for %v : %v", podContainerName, err)
 	}
 	return nil
