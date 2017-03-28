@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"sync"
@@ -12,7 +13,10 @@ import (
 	//	"k8s.io/apimachinery/pkg/util/uuid"
 
 	aff "k8s.io/kubernetes/cluster/addons/iso-client/coreaffinity"
+	"k8s.io/kubernetes/cluster/addons/iso-client/cputopology"
 	"k8s.io/kubernetes/cluster/addons/iso-client/discovery"
+	opaq "k8s.io/kubernetes/cluster/addons/iso-client/opaque"
+	"k8s.io/kubernetes/pkg/kubelet/api/v1alpha1/lifecycle"
 )
 
 const (
@@ -21,19 +25,49 @@ const (
 	// iso-client own address
 	eventHandlerLocalAddress = "localhost:5444"
 	// name of isolator
-	name = "iso"
+	name = "coreaffinity"
 )
+
+var topology cputopology.CPUTopology
+
+// TODO: handle more than just unregistering  evenDispatcherClient
+func handleSIGTERM(sigterm chan os.Signal, client *aff.EventDispatcherClient, opaque *opaq.OpaqueIntegerResourceAdvertiser) {
+	<-sigterm
+	unregisterRequest := &lifecycle.UnregisterRequest{
+		Name:  client.Name,
+		Token: client.Token,
+	}
+
+	if _, err := client.Unregister(client.Ctx, unregisterRequest); err != nil {
+		opaque.RemoveOpaqueResource()
+		glog.Fatalf("Failed to unregister handler: %v")
+	}
+	glog.Infof("Unregistering custom-isolator: %s", name)
+
+	if err := opaque.RemoveOpaqueResource(); err != nil {
+		glog.Fatalf("Failed to remove opaque resources: %v", err)
+	}
+
+	os.Exit(0)
+
+}
 
 // TODO: split it to smaller functions
 func main() {
 	flag.Parse()
 	glog.Info("Starting ...")
-	cpuTopo, err := discovery.DiscoverTopology()
+	topology, err := discovery.DiscoverTopology()
 	if err != nil {
 		glog.Fatalf("Cannot retrive CPU topology: %q", err)
 	}
 
-	glog.Infof("Detected topology: %v", cpuTopo)
+	opaque, err := opaq.NewOpaqueIntegerResourceAdvertiser(name, fmt.Sprintf("%d", topology.GetCpusNum()))
+	if err != nil {
+		glog.Fatalf("Cannot create opaque resource advertiser: %v", err)
+	}
+	if err = opaque.AdvertiseOpaqueResource(); err != nil {
+		glog.Fatalf("Failed to advertise opaque resources: %v", err)
+	}
 
 	var wg sync.WaitGroup
 	// Starting eventHandlerServer
@@ -46,8 +80,9 @@ func main() {
 	wg.Add(1)
 	go server.Serve(wg)
 
-	// Sening address of local eventHandlerServer
+	// Sending address of local eventHandlerServer
 	client, err := aff.NewEventDispatcherClient(name, eventDispatcherAddress, eventHandlerLocalAddress)
+
 	if err != nil {
 		glog.Fatalf("Cannot create eventDispatcherClient: %v", err)
 		os.Exit(1)
@@ -61,9 +96,9 @@ func main() {
 	glog.Infof("Registering eventDispatcherClient. Reply: %v", reply)
 
 	// Handling SigTerm
-	c := make(chan os.Signal, 2)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go aff.HandleSIGTERM(c, client)
+	sigterm := make(chan os.Signal, 2)
+	signal.Notify(sigterm, os.Interrupt, syscall.SIGTERM)
+	go handleSIGTERM(sigterm, client, opaque)
 
 	wg.Wait()
 }

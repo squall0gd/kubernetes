@@ -3,7 +3,6 @@ package coreaffinity
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"sync"
 
@@ -129,6 +128,10 @@ func (e *eventHandler) Notify(context context.Context, event *lifecycle.Event) (
 			}, nil
 		}
 
+		for _, container := range pod.Spec.Containers {
+			container.Resources.Limits[fmt.Sprintf("%s%s", api.ResourceOpaqueIntPrefix, e.Name)]
+		}
+
 		glog.Infof("Pod %s is managed by this isolator", pod.Name)
 		spec, err := getIsoSpec(pod.Annotations)
 		if err != nil {
@@ -151,7 +154,7 @@ func (e *eventHandler) Notify(context context.Context, event *lifecycle.Event) (
 			Error:      "",
 			CgroupInfo: event.CgroupInfo,
 			CgroupResource: &lifecycle.CgroupResource{
-				Value: spec.CoreAffinity,
+				Value:           spec.CoreAffinity,
 				CgroupSubsystem: lifecycle.CgroupResource_CPUSET_CPUS,
 			},
 		}, nil

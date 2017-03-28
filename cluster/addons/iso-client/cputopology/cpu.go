@@ -24,6 +24,10 @@ type CPUTopology struct {
 	Lock sync.Mutex
 }
 
+func (c *CPUTopology) GetCpusNum() int {
+	return len(c.CPU)
+}
+
 func (c *CPUTopology) GetNumSockets() int {
 	socketCounter := 0
 	for _, cpu := range c.CPU {
