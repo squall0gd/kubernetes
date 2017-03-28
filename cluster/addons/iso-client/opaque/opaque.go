@@ -2,16 +2,13 @@ package opaque
 
 import (
 	"bytes"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 
-	"github.com/golang/glog"
 	"k8s.io/kubernetes/pkg/client/restclient"
-	"k8s.io/kubernetes/pkg/client/unversioned/clientcmd"
+	"k8s.io/kubernetes/pkg/client/transport"
 )
 
 // struct which keeps all information necessary for advertising opaque resources
@@ -30,12 +27,12 @@ type opaqueIntegerResourceRequest struct {
 }
 
 // constructor for OpaqueIntegerResourceAdvertiser
-func NewOpaqueIntegerResourceAdvertiser(name string, value string, kubeConfigFile string) (*OpaqueIntegerResourceAdvertiser, error) {
+func NewOpaqueIntegerResourceAdvertiser(name string, value string) (*OpaqueIntegerResourceAdvertiser, error) {
 	node, err := getNode()
 	if err != nil {
 		return nil, err
 	}
-	config, err := getClientConfig(kubeConfigFile)
+	config, err := getClientConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -74,37 +71,11 @@ func (opaque *OpaqueIntegerResourceAdvertiser) generateOpaqueResourcePath() stri
 
 // generate url for adding or removing opaque resources
 func (opaque *OpaqueIntegerResourceAdvertiser) generateOpaqueResourceUrl() string {
-	apiserver := opaque.Config.Host
-	return fmt.Sprintf("%s/api/v1/nodes/%s/status", apiserver, opaque.Node)
+	return fmt.Sprintf("%s/api/v1/nodes/%s/status", opaque.Config.Host, opaque.Node)
 }
 
-// load configuration out of kubeconfig file which kubelet is using to connect to apiserver
-func getClientConfig(kubeConfig string) (*restclient.Config, error) {
-	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeConfig},
-		&clientcmd.ConfigOverrides{},
-	).ClientConfig()
-}
-
-// when using secure communication with apiServer retrieve certs from kubeconfig and use them
-func (opaque *OpaqueIntegerResourceAdvertiser) createTlsTransport() (*http.Transport, error) {
-	cert, err := tls.X509KeyPair(opaque.Config.TLSClientConfig.CertData, opaque.Config.TLSClientConfig.KeyData)
-	if err != nil {
-
-		return nil, err
-	}
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(opaque.Config.TLSClientConfig.CAData)
-	tlsConfig := &tls.Config{
-		RootCAs:      caCertPool,
-		Certificates: []tls.Certificate{cert},
-	}
-
-	tlsConfig.BuildNameToCertificate()
-	transport := &http.Transport{
-		TLSClientConfig: tlsConfig,
-	}
-	return transport, nil
+func getClientConfig() (*restclient.Config, error) {
+	return restclient.InClusterConfig()
 }
 
 // prepare PATCH request for adding/removing opaque resources
@@ -120,22 +91,22 @@ func prepareRequest(body []byte, url string) (*http.Request, error) {
 
 func (opaque *OpaqueIntegerResourceAdvertiser) createHttpClient() (*http.Client, error) {
 	// TODO: test it against insecure apiserver
-	if !opaque.Config.Insecure {
-		transport, err := opaque.createTlsTransport()
-		if err != nil {
-			return nil, err
-		}
-
-		return &http.Client{Transport: transport}, nil
+	transportConfig, err := opaque.Config.TransportConfig()
+	if err != nil {
+		return nil, err
 	}
-	return &http.Client{}, nil
+	transport, err := transport.New(transportConfig)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Client{Transport: transport}, nil
 }
 
-func (opaque *OpaqueIntegerResourceAdvertiser) advertiseOpaqueResource() error {
+func (opaque *OpaqueIntegerResourceAdvertiser) AdvertiseOpaqueResource() error {
 	return opaque.makeRequest("add")
 }
 
-func (opaque *OpaqueIntegerResourceAdvertiser) removeOpaqueResource() error {
+func (opaque *OpaqueIntegerResourceAdvertiser) RemoveOpaqueResource() error {
 	return opaque.makeRequest("remove")
 }
 
@@ -156,7 +127,6 @@ func (opaque *OpaqueIntegerResourceAdvertiser) makeRequest(operation string) err
 		return err
 	}
 
-	glog.Infof("Advertising: %s, on such url: %v", string(body), opaque.generateOpaqueResourceUrl())
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
