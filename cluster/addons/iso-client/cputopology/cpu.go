@@ -65,6 +65,15 @@ func (c *CPUTopology) GetCPU(cpuid int) *CPU {
 	return nil
 }
 
+func (c *CPUTopology) GetAvailableCPUs() (cpus []int) {
+	for _, cpu := range c.CPU {
+		if !cpu.IsInUse {
+			cpus = append(cpus, cpu.CPUID)
+		}
+	}
+	return
+}
+
 func (c *CPUTopology) Reserve(cpuid int) error {
 	c.Lock.Lock()
 	defer c.Lock.Unlock()

@@ -67,13 +67,17 @@ func (m *podContainerManagerImpl) applyLimits(pod *api.Pod, replies []*lifecycle
 	podContainerName, _ := m.GetPodContainerName(pod)
 	resources := ResourceConfigForPod(pod)
 	var errlist []error
+	glog.Infof("!!!!!!!!!!!!!!!!! replies %v", replies)
+
 	for _, reply := range replies {
+		glog.Infof("Replies %v", reply)
 		if reply.Error != "" {
 			errlist = append(errlist, fmt.Errorf("%v", reply.Error))
 			continue
 		}
-		switch  reply.CgroupResource.CgroupSubsystem {
+		switch reply.CgroupResource.CgroupSubsystem {
 		case lifecycle.CgroupResource_CPUSET_CPUS:
+			glog.Infof("!!!!!!!! value of cpuset: %v", reply.CgroupResource.Value)
 			resources.CpusetCpus = &reply.CgroupResource.Value
 			glog.Infof("applying CpusetCpus limit: %v", reply.CgroupResource.Value)
 		default:

@@ -13,7 +13,6 @@ import (
 	//	"k8s.io/apimachinery/pkg/util/uuid"
 
 	aff "k8s.io/kubernetes/cluster/addons/iso-client/coreaffinity"
-	"k8s.io/kubernetes/cluster/addons/iso-client/cputopology"
 	"k8s.io/kubernetes/cluster/addons/iso-client/discovery"
 	opaq "k8s.io/kubernetes/cluster/addons/iso-client/opaque"
 	"k8s.io/kubernetes/pkg/kubelet/api/v1alpha1/lifecycle"
@@ -27,8 +26,6 @@ const (
 	// name of isolator
 	name = "coreaffinity"
 )
-
-var topology cputopology.CPUTopology
 
 // TODO: handle more than just unregistering  evenDispatcherClient
 func handleSIGTERM(sigterm chan os.Signal, client *aff.EventDispatcherClient, opaque *opaq.OpaqueIntegerResourceAdvertiser) {
@@ -58,7 +55,7 @@ func main() {
 	glog.Info("Starting ...")
 	topology, err := discovery.DiscoverTopology()
 	if err != nil {
-		glog.Fatalf("Cannot retrive CPU topology: %q", err)
+		glog.Fatalf(err.Error())
 	}
 
 	opaque, err := opaq.NewOpaqueIntegerResourceAdvertiser(name, fmt.Sprintf("%d", topology.GetCpusNum()))
@@ -71,7 +68,7 @@ func main() {
 
 	var wg sync.WaitGroup
 	// Starting eventHandlerServer
-	server := aff.NewEventHandler(name, eventHandlerLocalAddress)
+	server := aff.NewEventHandler(name, eventHandlerLocalAddress, topology)
 	err = server.RegisterEventHandler()
 	if err != nil {
 		glog.Fatalf("Cannot register EventHandler: %v", err)
