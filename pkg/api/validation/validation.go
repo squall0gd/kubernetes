@@ -387,6 +387,11 @@ func validateVolumeSource(source *api.VolumeSource, fldPath *field.Path) field.E
 				allErrs = append(allErrs, field.Forbidden(fldPath.Child("emptyDir").Child("sizeLimit"), "SizeLimit field disabled by feature-gate for EmptyDir volumes"))
 			}
 		}
+		if source.EmptyDir.Medium == api.StorageMediumHugetlbfs {
+			if source.EmptyDir.HugetlbfsSize.Value() == 0 {
+				allErrs = append(allErrs, field.Required(fldPath.Child("emptyDir").Child("hugetlbfsSize"), "HugetlbfsSize field is required, when Medium field is set to Hugetlbfs"))
+			}
+		}
 	}
 	if source.HostPath != nil {
 		if numVolumes > 0 {

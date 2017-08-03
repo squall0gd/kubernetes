@@ -106,7 +106,7 @@ func (plugin *emptyDirPlugin) NewMounter(spec *volume.Spec, pod *v1.Pod, opts vo
 
 func (plugin *emptyDirPlugin) newMounterInternal(spec *volume.Spec, pod *v1.Pod, mounter mount.Interface, mountDetector mountDetector, opts volume.VolumeOptions) (volume.Mounter, error) {
 	medium := v1.StorageMediumDefault
-	size := ""
+	size := resource.Quantity{}
 	if spec.Volume.EmptyDir != nil { // Support a non-specified source as EmptyDir.
 		medium = spec.Volume.EmptyDir.Medium
 		size = spec.Volume.EmptyDir.HugetlbfsSize
@@ -130,6 +130,7 @@ func (plugin *emptyDirPlugin) NewUnmounter(volName string, podUID types.UID) (vo
 }
 
 func (plugin *emptyDirPlugin) newUnmounterInternal(volName string, podUID types.UID, mounter mount.Interface, mountDetector mountDetector) (volume.Unmounter, error) {
+
 	ed := &emptyDir{
 		pod:             &v1.Pod{ObjectMeta: metav1.ObjectMeta{UID: podUID}},
 		volName:         volName,
@@ -179,7 +180,7 @@ type emptyDir struct {
 	mounter       mount.Interface
 	mountDetector mountDetector
 	plugin        *emptyDirPlugin
-	size          string
+	size          resource.Quantity
 	volume.MetricsProvider
 }
 
@@ -285,15 +286,9 @@ func (ed *emptyDir) setupHugepages(dir string) error {
 	if isMnt && medium == mediumHugepages {
 		return nil
 	}
-	if ed.size == "" {
-		return fmt.Errorf("size is not provided")
-	}
-	if _, err := resource.ParseQuantity(ed.size); err != nil {
-		return fmt.Errorf("unsupported hugetlbfs size: %v", err)
-	}
 
 	glog.V(3).Infof("pod %v: mounting hugepages for volume %v", ed.pod.UID, ed.volName)
-	mountOptions := []string{fmt.Sprintf("size=%s", ed.size)}
+	mountOptions := []string{fmt.Sprintf("size=%s", ed.size.String())}
 	return ed.mounter.Mount("nodev", dir, "hugetlbfs", mountOptions)
 }
 
@@ -358,9 +353,14 @@ func (ed *emptyDir) TearDownAt(dir string) error {
 	if err != nil {
 		return err
 	}
-	if isMnt && medium == mediumMemory {
-		ed.medium = v1.StorageMediumMemory
-		return ed.teardownTmpfs(dir)
+	if isMnt {
+		if medium == mediumMemory {
+			ed.medium = v1.StorageMediumMemory
+			return ed.teardownTmpfsOrHugetlbfs(dir)
+		} else if medium == mediumHugepages {
+			ed.medium = v1.StorageMediumHugetlbfs
+			return ed.teardownTmpfsOrHugetlbfs(dir)
+		}
 	}
 	// assume StorageMediumDefault
 	return ed.teardownDefault(dir)
@@ -376,7 +376,7 @@ func (ed *emptyDir) teardownDefault(dir string) error {
 	return nil
 }
 
-func (ed *emptyDir) teardownTmpfs(dir string) error {
+func (ed *emptyDir) teardownTmpfsOrHugetlbfs(dir string) error {
 	if ed.mounter == nil {
 		return fmt.Errorf("memory storage requested, but mounter is nil")
 	}
