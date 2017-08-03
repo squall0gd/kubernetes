@@ -698,6 +698,8 @@ type EmptyDirVolumeSource struct {
 	// More info: https://kubernetes.io/docs/concepts/storage/volumes#emptydir
 	// +optional
 	Medium StorageMedium `json:"medium,omitempty" protobuf:"bytes,1,opt,name=medium,casttype=StorageMedium"`
+	// +optional
+	HugetlbfsSize string `json:"hugetlbfsSize,omitempty" protobuf:"bytes,3,opt,name=hugetlbfsSize"`
 	// Total amount of local storage required for this EmptyDir volume.
 	// The size limit is also applicable for memory medium.
 	// The maximum usage on memory medium EmptyDir would be the minimum value between
@@ -836,8 +838,9 @@ type FlockerVolumeSource struct {
 type StorageMedium string
 
 const (
-	StorageMediumDefault StorageMedium = ""       // use whatever the default is for the node
-	StorageMediumMemory  StorageMedium = "Memory" // use memory (tmpfs)
+	StorageMediumDefault   StorageMedium = ""          // use whatever the default is for the node
+	StorageMediumMemory    StorageMedium = "Memory"    // use memory (tmpfs)
+	StorageMediumHugetlbfs StorageMedium = "Hugetlbfs" // use hugepages
 )
 
 // Protocol defines network protocols supported for things like container ports.

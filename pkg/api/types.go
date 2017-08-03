@@ -614,6 +614,8 @@ type EmptyDirVolumeSource struct {
 	// The default is "" which means to use the node's default medium.
 	// +optional
 	Medium StorageMedium
+	// +optional
+	HugetlbfsSize string
 	// Total amount of local storage required for this EmptyDir volume.
 	// The size limit is also applicable for memory medium.
 	// The maximum usage on memory medium EmptyDir would be the minimum value between
@@ -628,8 +630,9 @@ type EmptyDirVolumeSource struct {
 type StorageMedium string
 
 const (
-	StorageMediumDefault StorageMedium = ""       // use whatever the default is for the node
-	StorageMediumMemory  StorageMedium = "Memory" // use memory (tmpfs)
+	StorageMediumDefault   StorageMedium = ""          // use whatever the default is for the node
+	StorageMediumMemory    StorageMedium = "Memory"    // use memory (tmpfs)
+	StorageMediumHugetlbfs StorageMedium = "Hugetlbfs" // use hugepages
 )
 
 // Protocol defines network protocols supported for things like container ports.

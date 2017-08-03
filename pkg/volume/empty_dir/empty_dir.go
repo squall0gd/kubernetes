@@ -21,8 +21,10 @@ import (
 	"os"
 	"path"
 
+	"github.com/Azure/azure-sdk-for-go/arm/resources/resources"
 	"github.com/golang/glog"
 	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/kubernetes/pkg/util/mount"
@@ -104,15 +106,19 @@ func (plugin *emptyDirPlugin) NewMounter(spec *volume.Spec, pod *v1.Pod, opts vo
 
 func (plugin *emptyDirPlugin) newMounterInternal(spec *volume.Spec, pod *v1.Pod, mounter mount.Interface, mountDetector mountDetector, opts volume.VolumeOptions) (volume.Mounter, error) {
 	medium := v1.StorageMediumDefault
+	size := ""
 	if spec.Volume.EmptyDir != nil { // Support a non-specified source as EmptyDir.
 		medium = spec.Volume.EmptyDir.Medium
+		size = spec.Volume.EmptyDir.HugetlbfsSize
 	}
+
 	return &emptyDir{
 		pod:             pod,
 		volName:         spec.Name(),
 		medium:          medium,
 		mounter:         mounter,
 		mountDetector:   mountDetector,
+		size:            size,
 		plugin:          plugin,
 		MetricsProvider: volume.NewMetricsDu(getPath(pod.UID, spec.Name(), plugin.host)),
 	}, nil
@@ -159,8 +165,9 @@ type mountDetector interface {
 type storageMedium int
 
 const (
-	mediumUnknown storageMedium = 0 // assume anything we don't explicitly handle is this
-	mediumMemory  storageMedium = 1 // memory (e.g. tmpfs on linux)
+	mediumUnknown   storageMedium = 0 // assume anything we don't explicitly handle is this
+	mediumMemory    storageMedium = 1 // memory (e.g. tmpfs on linux)
+	mediumHugepages storageMedium = 2 // hugepages
 )
 
 // EmptyDir volumes are temporary directories exposed to the pod.
@@ -172,6 +179,7 @@ type emptyDir struct {
 	mounter       mount.Interface
 	mountDetector mountDetector
 	plugin        *emptyDirPlugin
+	size          string
 	volume.MetricsProvider
 }
 
@@ -221,6 +229,8 @@ func (ed *emptyDir) SetUpAt(dir string, fsGroup *int64) error {
 		err = ed.setupDir(dir)
 	case v1.StorageMediumMemory:
 		err = ed.setupTmpfs(dir)
+	case v1.StorageMediumHugetlbfs:
+		err = ed.setupHugepages(dir)
 	default:
 		err = fmt.Errorf("unknown storage medium %q", ed.medium)
 	}
@@ -255,6 +265,36 @@ func (ed *emptyDir) setupTmpfs(dir string) error {
 
 	glog.V(3).Infof("pod %v: mounting tmpfs for volume %v", ed.pod.UID, ed.volName)
 	return ed.mounter.Mount("tmpfs", dir, "tmpfs", nil /* options */)
+}
+
+// setupHugepages creates a hugepage mount at the specified directory.
+func (ed *emptyDir) setupHugepages(dir string) error {
+	if ed.mounter == nil {
+		return fmt.Errorf("memory storage requested, but mounter is nil")
+	}
+	if err := ed.setupDir(dir); err != nil {
+		return err
+	}
+	// Make SetUp idempotent.
+	medium, isMnt, err := ed.mountDetector.GetMountMedium(dir)
+	if err != nil {
+		return err
+	}
+	// If the directory is a mountpoint with medium memory, there is no
+	// work to do since we are already in the desired state.
+	if isMnt && medium == mediumHugepages {
+		return nil
+	}
+	if ed.size == "" {
+		return fmt.Errorf("size is not provided")
+	}
+	if _, err := resource.ParseQuantity(ed.size); err != nil {
+		return fmt.Errorf("unsupported hugetlbfs size: %v", err)
+	}
+
+	glog.V(3).Infof("pod %v: mounting hugepages for volume %v", ed.pod.UID, ed.volName)
+	mountOptions := []string{fmt.Sprintf("size=%s", ed.size)}
+	return ed.mounter.Mount("nodev", dir, "hugetlbfs", mountOptions)
 }
 
 // setupDir creates the directory with the default permissions specified by the perm constant.
