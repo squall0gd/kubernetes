@@ -106,10 +106,10 @@ func (plugin *emptyDirPlugin) NewMounter(spec *volume.Spec, pod *v1.Pod, opts vo
 
 func (plugin *emptyDirPlugin) newMounterInternal(spec *volume.Spec, pod *v1.Pod, mounter mount.Interface, mountDetector mountDetector, opts volume.VolumeOptions) (volume.Mounter, error) {
 	medium := v1.StorageMediumDefault
-	size := resource.Quantity{}
+	//pagesize := resource.Quantity{}
+
 	if spec.Volume.EmptyDir != nil { // Support a non-specified source as EmptyDir.
 		medium = spec.Volume.EmptyDir.Medium
-		size = spec.Volume.EmptyDir.HugetlbfsSize
 	}
 
 	return &emptyDir{
@@ -118,7 +118,6 @@ func (plugin *emptyDirPlugin) newMounterInternal(spec *volume.Spec, pod *v1.Pod,
 		medium:          medium,
 		mounter:         mounter,
 		mountDetector:   mountDetector,
-		size:            size,
 		plugin:          plugin,
 		MetricsProvider: volume.NewMetricsDu(getPath(pod.UID, spec.Name(), plugin.host)),
 	}, nil
@@ -180,7 +179,6 @@ type emptyDir struct {
 	mounter       mount.Interface
 	mountDetector mountDetector
 	plugin        *emptyDirPlugin
-	size          resource.Quantity
 	volume.MetricsProvider
 }
 
@@ -230,7 +228,7 @@ func (ed *emptyDir) SetUpAt(dir string, fsGroup *int64) error {
 		err = ed.setupDir(dir)
 	case v1.StorageMediumMemory:
 		err = ed.setupTmpfs(dir)
-	case v1.StorageMediumHugetlbfs:
+	case v1.StorageMediumHugepages:
 		err = ed.setupHugepages(dir)
 	default:
 		err = fmt.Errorf("unknown storage medium %q", ed.medium)
@@ -288,7 +286,7 @@ func (ed *emptyDir) setupHugepages(dir string) error {
 	}
 
 	glog.V(3).Infof("pod %v: mounting hugepages for volume %v", ed.pod.UID, ed.volName)
-	mountOptions := []string{fmt.Sprintf("size=%s", ed.size.String())}
+	mountOptions := []string{}
 	return ed.mounter.Mount("nodev", dir, "hugetlbfs", mountOptions)
 }
 
@@ -358,7 +356,7 @@ func (ed *emptyDir) TearDownAt(dir string) error {
 			ed.medium = v1.StorageMediumMemory
 			return ed.teardownTmpfsOrHugetlbfs(dir)
 		} else if medium == mediumHugepages {
-			ed.medium = v1.StorageMediumHugetlbfs
+			ed.medium = v1.StorageMediumHugepages
 			return ed.teardownTmpfsOrHugetlbfs(dir)
 		}
 	}
