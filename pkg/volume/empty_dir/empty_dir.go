@@ -104,7 +104,6 @@ func (plugin *emptyDirPlugin) NewMounter(spec *volume.Spec, pod *v1.Pod, opts vo
 
 func (plugin *emptyDirPlugin) newMounterInternal(spec *volume.Spec, pod *v1.Pod, mounter mount.Interface, mountDetector mountDetector, opts volume.VolumeOptions) (volume.Mounter, error) {
 	medium := v1.StorageMediumDefault
-	//pagesize := resource.Quantity{}
 
 	if spec.Volume.EmptyDir != nil { // Support a non-specified source as EmptyDir.
 		medium = spec.Volume.EmptyDir.Medium
@@ -284,8 +283,7 @@ func (ed *emptyDir) setupHugepages(dir string) error {
 	}
 
 	glog.V(3).Infof("pod %v: mounting hugepages for volume %v", ed.pod.UID, ed.volName)
-	mountOptions := []string{}
-	return ed.mounter.Mount("nodev", dir, "hugetlbfs", mountOptions)
+	return ed.mounter.Mount("nodev", dir, "hugetlbfs", []string{})
 }
 
 // setupDir creates the directory with the default permissions specified by the perm constant.
