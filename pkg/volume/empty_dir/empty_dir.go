@@ -281,8 +281,19 @@ func (ed *emptyDir) setupHugepages(dir string) error {
 		return nil
 	}
 
+	// TODO: get size and pageSize mount options from pods resources request
+	options, err := ed.getHugePagesMountOptions()
+	if err != nil {
+		return err
+	}
+
 	glog.V(3).Infof("pod %v: mounting hugepages for volume %v", ed.pod.UID, ed.volName)
-	return ed.mounter.Mount("nodev", dir, "hugetlbfs", []string{})
+	return ed.mounter.Mount("nodev", dir, "hugetlbfs", options)
+}
+
+// TODO: put logic to retrieve mount options
+func (ed *emptyDir) getHugePagesMountOptions() ([]string, error) {
+	return []string{}, nil
 }
 
 // setupDir creates the directory with the default permissions specified by the perm constant.
