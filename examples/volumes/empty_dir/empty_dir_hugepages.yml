@@ -12,6 +12,11 @@ spec:
     volumeMounts:
     - mountPath: /hugepages
       name: hugepage
+    resources:
+      requests:
+        hugepages-2Mi: 100Mi
+      limits:
+        hugepages-2Mi: 100Mi
   volumes:
   - name: hugepage
     emptyDir: 
